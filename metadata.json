@@ -1,0 +1,5 @@
+{
+  "name": "集团资金管理系统",
+  "description": "多维度集团资金收支管理与预测原型，支持月度概览、日历视图及每日明细。",
+  "requestFramePermissions": []
+}
