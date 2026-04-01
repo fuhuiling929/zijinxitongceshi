@@ -11,6 +11,7 @@ import {
   eachDayOfInterval, 
   isSameMonth, 
   isSameDay, 
+  startOfDay,
   addMonths, 
   subMonths,
   startOfWeek,
@@ -48,6 +49,28 @@ import { mockTransactions, getCategoryName } from './mockData';
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const TOOLTIPS: Record<string, string> = {
+  gap: "资金缺口：到款总额-付款总额",
+  totalAmount: "付款总额：还款+现金充值",
+  repayment: "还款：媒体账单还款",
+  cash: "现金：媒体预充值现金+其他业务付款",
+  totalArrival: "到款总额：预付款+短期+后付+历史逾期回款+提前回款",
+  prepayment: "预付款：已到款+近7日消耗本月剩余天数预付款比例",
+  shortTerm: "短期：已到款+近7日消耗本月剩余天数短期比例",
+  creditTerm: "后付：已到款+未到款后付金额上月回款比例",
+  historyRecovery: "历史逾期：根据每个客户历史回款日期预估回款日期+手动标识",
+  advanceRecovery: "提前回款：实际提前回款+手动标识",
+  mediaArrival: "媒体到款：媒体返现+媒体退款",
+  dailyAvgConsumption: "日均消耗：上月日均",
+  totalConsumption: "总消耗：当月=已消耗+近7日均消耗剩余天数；后续月份=近7日消耗*天数；",
+  totalCredit: "总授信：常规授信+担保授信",
+  baseCredit: "常规授信：当月=已确认授信；后续月份=预估授信",
+  paymentGuarantee: "担保授信：当月=已确认授信；后续月份=上月授信",
+  mediaCurrentBalance: "当前余额：每日统计媒体后台代理商和投放户余额",
+  availableDays: "可用天数：当前结余/剩余天数",
+  gapDays: "缺口天数：资金缺口/日均消耗",
+};
 
 export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -150,6 +173,12 @@ export default function App() {
     return transactions.filter(t => isSameDay(new Date(t.date), selectedDate));
   }, [selectedDate, transactions]);
 
+  const today = startOfDay(new Date());
+  const isPastMonth = viewMode === 'month' && currentMonth < startOfMonth(today);
+  const isCurrentOrFutureMonth = viewMode === 'month' && currentMonth >= startOfMonth(today);
+  const isPastDay = viewMode === 'day' && selectedDate && selectedDate < today;
+  const isFutureOrCurrentDay = viewMode === 'day' && selectedDate && selectedDate >= today;
+
   const aggregatedDetails = useMemo(() => {
     let targetTrans: Transaction[] = [];
     if (viewMode === 'month') {
@@ -180,6 +209,9 @@ export default function App() {
           totalCredit: 0,
           baseCredit: 0,
           paymentGuarantee: 0,
+          mediaArrival: 0,
+          mediaCurrentBalance: 0,
+          availableDays: 0,
           count: 0
         };
       }
@@ -200,12 +232,18 @@ export default function App() {
       g.totalCredit += t.totalCredit || 0;
       g.baseCredit += t.baseCredit || 0;
       g.paymentGuarantee += t.paymentGuarantee || 0;
+      g.mediaArrival += t.mediaArrival || 0;
+      g.mediaCurrentBalance += t.mediaCurrentBalance || 0;
+      g.availableDays += t.availableDays || 0;
       g.count += 1;
     });
 
-    // Average gapDays
+    // Average gapDays and availableDays
     Object.values(groups).forEach((g: any) => {
-      if (g.count > 0) g.gapDays = g.gapDays / g.count;
+      if (g.count > 0) {
+        g.gapDays = g.gapDays / g.count;
+        g.availableDays = g.availableDays / g.count;
+      }
     });
 
     let result = Object.values(groups);
@@ -247,6 +285,9 @@ export default function App() {
       totalCredit: 0,
       baseCredit: 0,
       paymentGuarantee: 0,
+      mediaArrival: 0,
+      mediaCurrentBalance: 0,
+      availableDays: 0,
     };
     aggregatedDetails.forEach(g => {
       t.gap += g.gap;
@@ -265,9 +306,13 @@ export default function App() {
       t.totalCredit += g.totalCredit;
       t.baseCredit += g.baseCredit;
       t.paymentGuarantee += g.paymentGuarantee;
+      t.mediaArrival += g.mediaArrival;
+      t.mediaCurrentBalance += g.mediaCurrentBalance;
+      t.availableDays += g.availableDays;
     });
     if (aggregatedDetails.length > 0) {
       t.gapDays = t.gapDays / aggregatedDetails.length;
+      t.availableDays = t.availableDays / aggregatedDetails.length;
     }
     return t;
   }, [aggregatedDetails]);
@@ -275,6 +320,14 @@ export default function App() {
   // --- Handlers ---
 
   const toggleSort = (key: string) => {
+    const numericFields = [
+      'gap', 'totalAmount', 'repayment', 'cash', 'gapDays', 'totalArrival', 
+      'prepayment', 'shortTerm', 'creditTerm', 'historyRecovery', 'advanceRecovery',
+      'dailyAvgConsumption', 'totalConsumption', 'totalCredit', 'baseCredit', 
+      'paymentGuarantee', 'mediaArrival', 'mediaCurrentBalance', 'availableDays'
+    ];
+    if (!numericFields.includes(key)) return;
+
     setSortConfig(prev => {
       if (prev?.key === key) {
         return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
@@ -293,6 +346,13 @@ export default function App() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2 
     }).format(val);
+  };
+
+  const formatWan = (val: number) => {
+    return new Intl.NumberFormat('zh-CN', { 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2 
+    }).format(val / 10000) + ' 万元';
   };
 
   const handleAddTransaction = (newT: Partial<Transaction>) => {
@@ -393,7 +453,7 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
                   className={cn(
-                    "min-w-[380px] bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex flex-col gap-4 relative overflow-hidden group transition-all hover:shadow-lg",
+                    "min-w-[420px] bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex flex-col gap-4 relative overflow-hidden group transition-all hover:shadow-lg",
                     isSameMonth(m.month, currentMonth) && "ring-2 ring-indigo-600 ring-offset-4 border-transparent"
                   )}
                 >
@@ -410,22 +470,22 @@ export default function App() {
                   {/* Top Row: Totals and Balance */}
                   <div className="grid grid-cols-3 gap-3 pt-2">
                     <div className="space-y-1 min-w-0">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate" title="本月总应收">本月总应收</p>
-                      <p className="text-sm font-black font-mono text-gray-900 truncate" title={formatCurrency(m.totalMonthlyRec)}>{formatCurrency(m.totalMonthlyRec)}</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest" title="本月总应收">本月总应收</p>
+                      <p className="text-sm font-black font-mono text-gray-900" title={formatCurrency(m.totalMonthlyRec)}>{formatWan(m.totalMonthlyRec)}</p>
                     </div>
                     <div className="space-y-1 min-w-0">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate" title="本月总应付">本月总应付</p>
-                      <p className="text-sm font-black font-mono text-gray-900 truncate" title={formatCurrency(m.totalMonthlyPay)}>{formatCurrency(m.totalMonthlyPay)}</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest" title="本月总应付">本月总应付</p>
+                      <p className="text-sm font-black font-mono text-gray-900" title={formatCurrency(m.totalMonthlyPay)}>{formatWan(m.totalMonthlyPay)}</p>
                     </div>
                     <div className="space-y-1 min-w-0">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate" title={m.balance >= 0 ? "盈余" : "缺口"}>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest" title={m.balance >= 0 ? "盈余" : "缺口"}>
                         {m.balance >= 0 ? "盈余" : "缺口"}
                       </p>
                       <p className={cn(
-                        "text-sm font-black font-mono truncate",
+                        "text-sm font-black font-mono",
                         m.balance >= 0 ? "text-emerald-600" : "text-rose-600"
                       )} title={formatCurrency(m.balance)}>
-                        {formatCurrency(m.balance)}
+                        {formatWan(m.balance)}
                       </p>
                     </div>
                   </div>
@@ -434,28 +494,28 @@ export default function App() {
                     {/* Details Section */}
                     <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-50/50">
                       <div className="space-y-2 min-w-0">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider truncate">实际应收明细</p>
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">实际应收明细</p>
                         <div className="space-y-1 pl-1 border-l-2 border-gray-100">
                           <div className="flex justify-between items-center gap-2 min-w-0">
                             <span className="text-[9px] text-gray-400 font-bold shrink-0">已收:</span>
-                            <span className="text-[10px] font-bold font-mono text-emerald-600 truncate" title={formatCurrency(m.settledRec)}>{formatCurrency(m.settledRec)}</span>
+                            <span className="text-[10px] font-bold font-mono text-emerald-600" title={formatCurrency(m.settledRec)}>{formatWan(m.settledRec)}</span>
                           </div>
                           <div className="flex justify-between items-center gap-2 min-w-0">
                             <span className="text-[9px] text-gray-400 font-bold shrink-0">未收:</span>
-                            <span className="text-[10px] font-bold font-mono text-emerald-400 truncate" title={formatCurrency(m.pendingRec)}>{formatCurrency(m.pendingRec)}</span>
+                            <span className="text-[10px] font-bold font-mono text-emerald-400" title={formatCurrency(m.pendingRec)}>{formatWan(m.pendingRec)}</span>
                           </div>
                         </div>
                       </div>
                       <div className="space-y-2 min-w-0">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider truncate">实际应付明细</p>
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">实际应付明细</p>
                         <div className="space-y-1 pl-1 border-l-2 border-gray-100">
                           <div className="flex justify-between items-center gap-2 min-w-0">
                             <span className="text-[9px] text-gray-400 font-bold shrink-0">已付:</span>
-                            <span className="text-[10px] font-bold font-mono text-rose-600 truncate" title={formatCurrency(m.settledPay)}>{formatCurrency(m.settledPay)}</span>
+                            <span className="text-[10px] font-bold font-mono text-rose-600" title={formatCurrency(m.settledPay)}>{formatWan(m.settledPay)}</span>
                           </div>
                           <div className="flex justify-between items-center gap-2 min-w-0">
                             <span className="text-[9px] text-gray-400 font-bold shrink-0">未付:</span>
-                            <span className="text-[10px] font-bold font-mono text-rose-400 truncate" title={formatCurrency(m.pendingPay)}>{formatCurrency(m.pendingPay)}</span>
+                            <span className="text-[10px] font-bold font-mono text-rose-400" title={formatCurrency(m.pendingPay)}>{formatWan(m.pendingPay)}</span>
                           </div>
                         </div>
                       </div>
@@ -547,7 +607,7 @@ export default function App() {
 
 
         {/* Detailed Table View (Common for both modes) */}
-        <section className="space-y-4">
+        <section className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black flex items-center gap-3">
               <div className="w-1.5 h-6 bg-indigo-600 rounded-full"></div>
@@ -566,87 +626,361 @@ export default function App() {
             </div>
           </div>
 
+          {/* Summary Cards for Month/Day View (Current/Future/Past) */}
+          {(isCurrentOrFutureMonth || isPastMonth || isFutureOrCurrentDay || isPastDay) && (
+            <div className="grid grid-cols-3 gap-6 max-w-4xl mx-auto">
+              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center space-y-2">
+                <p className="text-xs font-black text-orange-800 bg-orange-200/50 inline-block px-3 py-1 rounded-md">资金缺口</p>
+                <p className="text-xl font-black font-mono text-gray-900">{formatCurrency(totals.gap)}</p>
+              </div>
+              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center space-y-2">
+                <p className="text-xs font-black text-orange-800 bg-orange-200/50 inline-block px-3 py-1 rounded-md">
+                  {viewMode === 'month' ? '本月总到款' : '本日总到款'}
+                </p>
+                <p className="text-xl font-black font-mono text-gray-900">{formatCurrency(totals.totalArrival)}</p>
+              </div>
+              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center space-y-2">
+                <p className="text-xs font-black text-orange-800 bg-orange-200/50 inline-block px-3 py-1 rounded-md">
+                  {viewMode === 'month' ? '本月总支出' : '本日总支出'}
+                </p>
+                <p className="text-xl font-black font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</p>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto bg-white rounded-[2.5rem] border border-gray-200 shadow-sm no-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[1800px]">
+            <table className="w-full text-left border-collapse min-w-[2200px]">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th rowSpan={2} className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest border-r border-gray-200 text-center w-16">序号</th>
-                  <th rowSpan={2} className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest border-r border-gray-200 sticky left-0 bg-gray-50 z-10 w-48">
-                    <div className="flex items-center justify-between">
-                      资金来源
-                      <button onClick={() => toggleSort('source')} className="hover:text-indigo-600 transition-all"><ArrowUpDown size={14} /></button>
-                    </div>
-                  </th>
-                  <th colSpan={6} className="p-3 text-center text-[10px] font-black text-blue-600 uppercase tracking-widest border-r border-gray-200 bg-blue-50/50">资金统计</th>
-                  <th colSpan={5} className="p-3 text-center text-[10px] font-black text-cyan-600 uppercase tracking-widest border-r border-gray-200 bg-cyan-50/50">业务预估回款</th>
-                  <th colSpan={5} className="p-3 text-center text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50/50">预估消耗及媒体授信</th>
-                </tr>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <SortableHeader label="资金缺口" field="gap" color="text-blue-500" onSort={toggleSort} />
-                  <SortableHeader label="付款资金总额" field="totalAmount" color="text-blue-500" onSort={toggleSort} />
-                  <SortableHeader label="还款" field="repayment" color="text-blue-500" onSort={toggleSort} />
-                  <SortableHeader label="现金" field="cash" color="text-blue-500" onSort={toggleSort} />
-                  <SortableHeader label="缺口天数" field="gapDays" color="text-blue-500" onSort={toggleSort} />
-                  <SortableHeader label="到款总额" field="totalArrival" color="text-blue-500" onSort={toggleSort} borderRight />
-                  
-                  <SortableHeader label="预付款" field="prepayment" color="text-cyan-500" onSort={toggleSort} />
-                  <SortableHeader label="短期" field="shortTerm" color="text-cyan-500" onSort={toggleSort} />
-                  <SortableHeader label="帐期" field="creditTerm" color="text-cyan-500" onSort={toggleSort} />
-                  <SortableHeader label="历史逾期回款" field="historyRecovery" color="text-cyan-500" onSort={toggleSort} />
-                  <SortableHeader label="提前回款" field="advanceRecovery" color="text-cyan-500" onSort={toggleSort} borderRight />
-                  
-                  <SortableHeader label="日均消耗-有效" field="dailyAvgConsumption" color="text-emerald-500" onSort={toggleSort} />
-                  <SortableHeader label="总消耗-有效" field="totalConsumption" color="text-emerald-500" onSort={toggleSort} />
-                  <SortableHeader label="总授信" field="totalCredit" color="text-emerald-500" onSort={toggleSort} />
-                  <SortableHeader label="常规授信" field="baseCredit" color="text-emerald-500" onSort={toggleSort} />
-                  <SortableHeader label="担保授信" field="paymentGuarantee" color="text-emerald-500" onSort={toggleSort} />
-                </tr>
+                {isCurrentOrFutureMonth ? (
+                  <>
+                    <tr className="bg-gray-100/50 text-[10px] font-black text-gray-500 border-b border-gray-200">
+                      <th colSpan={2} className="p-2 border-r border-gray-200 text-center">/</th>
+                      <th colSpan={5} className="p-2 border-r border-gray-200 text-center bg-blue-50/50 text-blue-700">资金统计</th>
+                      <th colSpan={6} className="p-2 border-r border-gray-200 text-center bg-cyan-50/50 text-cyan-700">预估到账</th>
+                      <th colSpan={8} className="p-2 text-center bg-emerald-50/50 text-emerald-700">预估消耗及媒体授信</th>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 w-12 text-center">序号</th>
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 sticky left-0 bg-gray-50 z-10 w-48 text-center">资金类型</th>
+                      <SortableHeader label="资金缺口" field="gap" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.gap} />
+                      <SortableHeader label="付款总额" field="totalAmount" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.totalAmount} />
+                      <SortableHeader label="还款" field="repayment" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.repayment} />
+                      <SortableHeader label="现金" field="cash" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.cash} />
+                      <SortableHeader label="到款总额" field="totalArrival" color="text-blue-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.totalArrival} />
+                      
+                      <SortableHeader label="预付款" field="prepayment" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.prepayment} />
+                      <SortableHeader label="短期" field="shortTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.shortTerm} />
+                      <SortableHeader label="后付" field="creditTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.creditTerm} />
+                      <SortableHeader label="历史逾期" field="historyRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.historyRecovery} />
+                      <SortableHeader label="提前回款" field="advanceRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.advanceRecovery} />
+                      <SortableHeader label="媒体到款" field="mediaArrival" color="text-cyan-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.mediaArrival} />
+                      
+                      <SortableHeader label="日均消耗" field="dailyAvgConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.dailyAvgConsumption} />
+                      <SortableHeader label="总消耗" field="totalConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalConsumption} />
+                      <SortableHeader label="总授信" field="totalCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalCredit} />
+                      <SortableHeader label="常规授信" field="baseCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.baseCredit} />
+                      <SortableHeader label="担保授信" field="paymentGuarantee" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.paymentGuarantee} />
+                      <SortableHeader label="当前余额" field="mediaCurrentBalance" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.mediaCurrentBalance} />
+                      <SortableHeader label="可用天数" field="availableDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.availableDays} />
+                      <SortableHeader label="缺口天数" field="gapDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.gapDays} />
+                    </tr>
+                  </>
+                ) : isPastMonth ? (
+                  <>
+                    <tr className="bg-gray-100/50 text-[10px] font-black text-gray-500 border-b border-gray-200">
+                      <th colSpan={2} className="p-2 border-r border-gray-200 text-center">/</th>
+                      <th colSpan={5} className="p-2 border-r border-gray-200 text-center bg-blue-50/50 text-blue-700">资金统计</th>
+                      <th colSpan={6} className="p-2 border-r border-gray-200 text-center bg-cyan-50/50 text-cyan-700">实际到款</th>
+                      <th colSpan={8} className="p-2 text-center bg-emerald-50/50 text-emerald-700">实际消耗及媒体授信</th>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 w-12 text-center">序号</th>
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 sticky left-0 bg-gray-50 z-10 w-48 text-center">资金类型</th>
+                      <SortableHeader label="资金缺口" field="gap" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.gap} />
+                      <SortableHeader label="付款总额" field="totalAmount" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.totalAmount} />
+                      <SortableHeader label="还款" field="repayment" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.repayment} />
+                      <SortableHeader label="现金" field="cash" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.cash} />
+                      <SortableHeader label="到款总额" field="totalArrival" color="text-blue-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.totalArrival} />
+                      
+                      <SortableHeader label="预付款" field="prepayment" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.prepayment} />
+                      <SortableHeader label="短期" field="shortTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.shortTerm} />
+                      <SortableHeader label="后付" field="creditTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.creditTerm} />
+                      <SortableHeader label="历史逾期" field="historyRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.historyRecovery} />
+                      <SortableHeader label="提前回款" field="advanceRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.advanceRecovery} />
+                      <SortableHeader label="媒体到款" field="mediaArrival" color="text-cyan-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.mediaArrival} />
+                      
+                      <SortableHeader label="日均消耗" field="dailyAvgConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.dailyAvgConsumption} />
+                      <SortableHeader label="总消耗" field="totalConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalConsumption} />
+                      <SortableHeader label="总授信" field="totalCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalCredit} />
+                      <SortableHeader label="常规授信" field="baseCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.baseCredit} />
+                      <SortableHeader label="担保授信" field="paymentGuarantee" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.paymentGuarantee} />
+                      <SortableHeader label="当前余额" field="mediaCurrentBalance" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.mediaCurrentBalance} />
+                      <SortableHeader label="可用天数" field="availableDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.availableDays} />
+                      <SortableHeader label="缺口天数" field="gapDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.gapDays} />
+                    </tr>
+                  </>
+                ) : (isFutureOrCurrentDay || isPastDay) ? (
+                  <>
+                    <tr className="bg-gray-100/50 text-[10px] font-black text-gray-500 border-b border-gray-200">
+                      <th colSpan={2} className="p-2 border-r border-gray-200 text-center">/</th>
+                      <th colSpan={5} className="p-2 border-r border-gray-200 text-center bg-blue-50/50 text-blue-700">资金统计</th>
+                      <th colSpan={6} className="p-2 border-r border-gray-200 text-center bg-cyan-50/50 text-cyan-700">
+                        {isFutureOrCurrentDay ? '预估到款' : '实际到款'}
+                      </th>
+                      <th colSpan={8} className="p-2 text-center bg-emerald-50/50 text-emerald-700">
+                        {isFutureOrCurrentDay ? '预估消耗及媒体授信' : '实际消耗及媒体授信'}
+                      </th>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 w-12 text-center">序号</th>
+                      <th className="p-3 text-[9px] font-black uppercase text-gray-400 border-r border-gray-100 sticky left-0 bg-gray-50 z-10 w-48 text-center">资金类型</th>
+                      <SortableHeader label="资金缺口" field="gap" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.gap} />
+                      <SortableHeader label="付款总额" field="totalAmount" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.totalAmount} />
+                      <SortableHeader label="还款" field="repayment" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.repayment} />
+                      <SortableHeader label="现金" field="cash" color="text-blue-600" onSort={toggleSort} tooltip={TOOLTIPS.cash} />
+                      <SortableHeader label="到款总额" field="totalArrival" color="text-blue-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.totalArrival} />
+                      
+                      <SortableHeader label="预付款" field="prepayment" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.prepayment} />
+                      <SortableHeader label="短期" field="shortTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.shortTerm} />
+                      <SortableHeader label="后付" field="creditTerm" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.creditTerm} />
+                      <SortableHeader label="历史逾期" field="historyRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.historyRecovery} />
+                      <SortableHeader label="提前回款" field="advanceRecovery" color="text-cyan-600" onSort={toggleSort} tooltip={TOOLTIPS.advanceRecovery} />
+                      <SortableHeader label="媒体到款" field="mediaArrival" color="text-cyan-600" onSort={toggleSort} borderRight tooltip={TOOLTIPS.mediaArrival} />
+                      
+                      <SortableHeader label="日均消耗" field="dailyAvgConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.dailyAvgConsumption} />
+                      <SortableHeader label="总消耗" field="totalConsumption" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalConsumption} />
+                      <SortableHeader label="总授信" field="totalCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.totalCredit} />
+                      <SortableHeader label="常规授信" field="baseCredit" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.baseCredit} />
+                      <SortableHeader label="担保授信" field="paymentGuarantee" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.paymentGuarantee} />
+                      <SortableHeader label="当前余额" field="mediaCurrentBalance" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.mediaCurrentBalance} />
+                      <SortableHeader label="可用天数" field="availableDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.availableDays} />
+                      <SortableHeader label="缺口天数" field="gapDays" color="text-emerald-600" onSort={toggleSort} tooltip={TOOLTIPS.gapDays} />
+                    </tr>
+                  </>
+                ) : (
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest border-r border-gray-200 text-center w-16">序号</th>
+                    <th className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest border-r border-gray-200 sticky left-0 bg-gray-50 z-10 w-48">资金来源</th>
+                    <SortableHeader label="资金缺口" field="gap" color="text-blue-500" onSort={toggleSort} tooltip={TOOLTIPS.gap} />
+                    <SortableHeader label="付款总额" field="totalAmount" color="text-blue-500" onSort={toggleSort} tooltip={TOOLTIPS.totalAmount} />
+                    <SortableHeader label="还款" field="repayment" color="text-blue-500" onSort={toggleSort} tooltip={TOOLTIPS.repayment} />
+                    <SortableHeader label="现金" field="cash" color="text-blue-500" onSort={toggleSort} tooltip={TOOLTIPS.cash} />
+                    <SortableHeader label="到款总额" field="totalArrival" color="text-blue-500" onSort={toggleSort} borderRight tooltip={TOOLTIPS.totalArrival} />
+                    
+                    <SortableHeader label="预付款" field="prepayment" color="text-cyan-500" onSort={toggleSort} tooltip={TOOLTIPS.prepayment} />
+                    <SortableHeader label="短期" field="shortTerm" color="text-cyan-500" onSort={toggleSort} tooltip={TOOLTIPS.shortTerm} />
+                    <SortableHeader label="后付" field="creditTerm" color="text-cyan-500" onSort={toggleSort} tooltip={TOOLTIPS.creditTerm} />
+                    <SortableHeader label="历史逾期" field="historyRecovery" color="text-cyan-500" onSort={toggleSort} tooltip={TOOLTIPS.historyRecovery} />
+                    <SortableHeader label="提前回款" field="advanceRecovery" color="text-cyan-500" onSort={toggleSort} tooltip={TOOLTIPS.advanceRecovery} />
+                    <SortableHeader label="媒体到款" field="mediaArrival" color="text-cyan-500" onSort={toggleSort} borderRight tooltip={TOOLTIPS.mediaArrival} />
+                    
+                    <SortableHeader label="日均消耗" field="dailyAvgConsumption" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.dailyAvgConsumption} />
+                    <SortableHeader label="总消耗" field="totalConsumption" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.totalConsumption} />
+                    <SortableHeader label="总授信" field="totalCredit" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.totalCredit} />
+                    <SortableHeader label="常规授信" field="baseCredit" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.baseCredit} />
+                    <SortableHeader label="担保授信" field="paymentGuarantee" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.paymentGuarantee} />
+                    <SortableHeader label="当前余额" field="mediaCurrentBalance" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.mediaCurrentBalance} />
+                    <SortableHeader label="可用天数" field="availableDays" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.availableDays} />
+                    <SortableHeader label="缺口天数" field="gapDays" color="text-emerald-500" onSort={toggleSort} tooltip={TOOLTIPS.gapDays} />
+                  </tr>
+                )}
               </thead>
               <tbody>
                 {/* Total Row */}
                 <tr className="bg-rose-50/30 font-black border-b border-gray-100">
-                  <td className="p-4 text-center text-xs text-gray-400 border-r border-gray-100">-</td>
-                  <td className="p-4 text-xs text-gray-900 border-r border-gray-100 sticky left-0 bg-rose-50/30 z-10">总计</td>
-                  <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(totals.gap)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.repayment)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.cash)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{totals.gapDays.toFixed(1)}</td>
-                  <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-100">{formatCurrency(totals.totalArrival)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.prepayment)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.shortTerm)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.creditTerm)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.historyRecovery)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900 border-r border-gray-100">{formatCurrency(totals.advanceRecovery)}</td>
-                  <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(totals.dailyAvgConsumption)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalConsumption)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalCredit)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.baseCredit)}</td>
-                  <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.paymentGuarantee)}</td>
+                  <td className="p-4 text-center text-xs text-gray-400 border-r border-gray-100">总计</td>
+                  <td className="p-4 text-xs text-gray-900 border-r border-gray-100 sticky left-0 bg-rose-50/30 z-10">/</td>
+                  
+                  {isCurrentOrFutureMonth ? (
+                    <>
+                      <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(totals.gap)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.repayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.cash)}</td>
+                      <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-100">{formatCurrency(totals.totalArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.prepayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.shortTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.creditTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.historyRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.advanceRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900 border-r border-gray-100">{formatCurrency(totals.mediaArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(totals.dailyAvgConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.baseCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.paymentGuarantee)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.mediaCurrentBalance)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{totals.availableDays.toFixed(1)}</td>
+                      <td className="p-4 text-xs font-mono text-rose-600">{totals.gapDays.toFixed(1)}</td>
+                    </>
+                  ) : isPastMonth ? (
+                    <>
+                      <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(totals.gap)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.repayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.cash)}</td>
+                      <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-100">{formatCurrency(totals.totalArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.prepayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.shortTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.creditTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.historyRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.advanceRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900 border-r border-gray-100">{formatCurrency(totals.mediaArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(totals.dailyAvgConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.baseCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.paymentGuarantee)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.mediaCurrentBalance)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{totals.availableDays.toFixed(1)}</td>
+                      <td className="p-4 text-xs font-mono text-rose-600">{totals.gapDays.toFixed(1)}</td>
+                    </>
+                  ) : (isFutureOrCurrentDay || isPastDay) ? (
+                    <>
+                      <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(totals.gap)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.repayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.cash)}</td>
+                      <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-100">{formatCurrency(totals.totalArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.prepayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.shortTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.creditTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.historyRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.advanceRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900 border-r border-gray-100">{formatCurrency(totals.mediaArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(totals.dailyAvgConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.baseCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.paymentGuarantee)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.mediaCurrentBalance)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{totals.availableDays.toFixed(1)}</td>
+                      <td className="p-4 text-xs font-mono text-rose-600">{totals.gapDays.toFixed(1)}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(totals.gap)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalAmount)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.repayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.cash)}</td>
+                      <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-100">{formatCurrency(totals.totalArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.prepayment)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.shortTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.creditTerm)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.historyRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.advanceRecovery)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900 border-r border-gray-100">{formatCurrency(totals.mediaArrival)}</td>
+                      <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(totals.dailyAvgConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalConsumption)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.totalCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.baseCredit)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.paymentGuarantee)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{formatCurrency(totals.mediaCurrentBalance)}</td>
+                      <td className="p-4 text-xs font-mono text-gray-900">{totals.availableDays.toFixed(1)}</td>
+                      <td className="p-4 text-xs font-mono text-rose-600">{totals.gapDays.toFixed(1)}</td>
+                    </>
+                  )}
                 </tr>
                 {/* Data Rows */}
-                {aggregatedDetails.map((row, idx) => (
-                  <tr key={row.source} className="border-b border-gray-50 hover:bg-gray-50/50 transition-all">
-                    <td className="p-4 text-center text-xs text-gray-400 border-r border-gray-50">{idx + 1}</td>
-                    <td className="p-4 text-xs font-bold text-gray-900 border-r border-gray-50 sticky left-0 bg-white group-hover:bg-gray-50 z-10">{row.source}</td>
-                    <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(row.gap)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalAmount)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.repayment)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.cash)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{row.gapDays.toFixed(1)}</td>
-                    <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-50">{formatCurrency(row.totalArrival)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.prepayment)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.shortTerm)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.creditTerm)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.historyRecovery)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600 border-r border-gray-50">{formatCurrency(row.advanceRecovery)}</td>
-                    <td className="p-4 text-xs font-mono text-indigo-600">{formatCurrency(row.dailyAvgConsumption)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalConsumption)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalCredit)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.baseCredit)}</td>
-                    <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.paymentGuarantee)}</td>
-                  </tr>
-                ))}
+                {aggregatedDetails.map((row, idx) => {
+                  const isRestricted = ["外部借款", "运营成本", "其他费用"].includes(row.source);
+                  return (
+                    <tr key={row.source} className="border-b border-gray-50 hover:bg-gray-50/50 transition-all">
+                      <td className="p-4 text-center text-xs text-gray-400 border-r border-gray-50">{idx + 1}</td>
+                      <td className="p-4 text-xs font-bold text-gray-900 border-r border-gray-50 sticky left-0 bg-white group-hover:bg-gray-50 z-10">{row.source}</td>
+                      
+                      {isCurrentOrFutureMonth ? (
+                        <>
+                          <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(row.gap)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalAmount)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.repayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.cash)}</td>
+                          <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-50">{formatCurrency(row.totalArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.prepayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.shortTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.creditTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.historyRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.advanceRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600 border-r border-gray-50">{isRestricted ? "-" : formatCurrency(row.mediaArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-indigo-600">{isRestricted ? "-" : formatCurrency(row.dailyAvgConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.baseCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.paymentGuarantee)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.mediaCurrentBalance)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : row.availableDays.toFixed(1)}</td>
+                          <td className="p-4 text-xs font-mono text-rose-600">{isRestricted ? "-" : row.gapDays.toFixed(1)}</td>
+                        </>
+                      ) : isPastMonth ? (
+                        <>
+                          <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(row.gap)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalAmount)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.repayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.cash)}</td>
+                          <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-50">{formatCurrency(row.totalArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.prepayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.shortTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.creditTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.historyRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.advanceRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600 border-r border-gray-50">{isRestricted ? "-" : formatCurrency(row.mediaArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-indigo-600">{isRestricted ? "-" : formatCurrency(row.dailyAvgConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.baseCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.paymentGuarantee)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.mediaCurrentBalance)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : row.availableDays.toFixed(1)}</td>
+                          <td className="p-4 text-xs font-mono text-rose-600">{isRestricted ? "-" : row.gapDays.toFixed(1)}</td>
+                        </>
+                      ) : (isFutureOrCurrentDay || isPastDay) ? (
+                        <>
+                          <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(row.gap)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalAmount)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.repayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.cash)}</td>
+                          <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-50">{formatCurrency(row.totalArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.prepayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.shortTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.creditTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.historyRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.advanceRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600 border-r border-gray-50">{isRestricted ? "-" : formatCurrency(row.mediaArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-indigo-600">{isRestricted ? "-" : formatCurrency(row.dailyAvgConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.baseCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.paymentGuarantee)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.mediaCurrentBalance)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : row.availableDays.toFixed(1)}</td>
+                          <td className="p-4 text-xs font-mono text-rose-600">{isRestricted ? "-" : row.gapDays.toFixed(1)}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="p-4 text-xs font-mono text-rose-600">{formatCurrency(row.gap)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{formatCurrency(row.totalAmount)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.repayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.cash)}</td>
+                          <td className="p-4 text-xs font-mono text-emerald-600 border-r border-gray-50">{formatCurrency(row.totalArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.prepayment)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.shortTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.creditTerm)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.historyRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.advanceRecovery)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600 border-r border-gray-50">{isRestricted ? "-" : formatCurrency(row.mediaArrival)}</td>
+                          <td className="p-4 text-xs font-mono text-indigo-600">{isRestricted ? "-" : formatCurrency(row.dailyAvgConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalConsumption)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.totalCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.baseCredit)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.paymentGuarantee)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : formatCurrency(row.mediaCurrentBalance)}</td>
+                          <td className="p-4 text-xs font-mono text-gray-600">{isRestricted ? "-" : row.availableDays.toFixed(1)}</td>
+                          <td className="p-4 text-xs font-mono text-rose-600">{isRestricted ? "-" : row.gapDays.toFixed(1)}</td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
                 {aggregatedDetails.length === 0 && (
                   <tr>
                     <td colSpan={18} className="p-20 text-center text-gray-400 font-bold">
@@ -757,11 +1091,22 @@ export default function App() {
   );
 }
 
-function SortableHeader({ label, field, color, onSort, borderRight }: { label: string; field: string; color: string; onSort: (key: string) => void; borderRight?: boolean }) {
+function SortableHeader({ label, field, color, onSort, borderRight, tooltip }: { label: string; field: string; color: string; onSort: (key: string) => void; borderRight?: boolean; tooltip?: string }) {
   return (
-    <th className={cn("p-3 text-[9px] font-black uppercase tracking-tighter border-b border-gray-100", color, borderRight && "border-r border-gray-200")}>
+    <th className={cn("group p-3 text-[9px] font-black uppercase tracking-tighter border-b border-gray-100", color, borderRight && "border-r border-gray-200")}>
       <div className="flex items-center justify-between gap-1">
-        <span className="truncate">{label}</span>
+        <div className="flex items-center gap-1 truncate">
+          {tooltip && (
+            <div className="relative flex-shrink-0">
+              <Info size={10} className="text-gray-400 cursor-help" />
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-50 w-48 p-2 bg-gray-900 text-white text-[10px] font-bold rounded-lg shadow-xl leading-relaxed normal-case tracking-normal">
+                {tooltip}
+                <div className="absolute top-full left-2 -mt-1 border-4 border-transparent border-t-gray-900" />
+              </div>
+            </div>
+          )}
+          <span className="truncate">{label}</span>
+        </div>
         <button onClick={() => onSort(field)} className="hover:text-indigo-600 transition-all shrink-0"><ArrowUpDown size={12} /></button>
       </div>
     </th>

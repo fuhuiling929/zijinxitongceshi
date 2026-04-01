@@ -4,7 +4,6 @@ import { addDays, format, startOfMonth, endOfMonth, eachDayOfInterval, startOfYe
 const sources = [
   '头条-巨量',
   '头条-千川',
-  '头条-聚星',
   '外部借款',
   '行政费用',
   '其他费用'

@@ -34,6 +34,9 @@ export interface Transaction {
   totalConsumption?: number;
   baseCredit?: number;
   paymentGuarantee?: number;
+  mediaArrival?: number;
+  mediaCurrentBalance?: number;
+  availableDays?: number;
 }
 
 export interface ForecastConfig {
